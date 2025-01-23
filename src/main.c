@@ -41,6 +41,10 @@ SDL_Window *window;
 SDL_Renderer *renderer;
 
 void update_window_title() {
+    if (!cam_state.ready) {
+        SDL_SetWindowTitle(window, "J-Ascii2");
+        return;
+    }
     // Title
     char title[256];
     SDL_CameraID device = SDL_GetCameraID(cam_state.camera);
@@ -73,9 +77,11 @@ bool open_camera(SDL_CameraID device) {
     cam_state.camera = SDL_OpenCamera(device, best_format);
     if (cam_state.camera == NULL) {
         SDL_free(formats);
+        cam_state.ready = false;
         return false;
     }
 
+    // update state
     cam_state.ready = true;
     cam_state.resx = best_format->width;
     cam_state.resy = best_format->height;
@@ -85,8 +91,22 @@ bool open_camera(SDL_CameraID device) {
     g_state.frame_w = DEFAULT_RES;
     g_state.frame_h = g_state.frame_w * ((float)cam_state.resy / cam_state.resx);
 
+    // update these on new camera open
+    ascii_update_font_size((float)g_state.window_height / g_state.frame_h);
+    update_window_title();
+
     SDL_free(formats);
     return true;
+}
+
+void load_cameras() {
+    // load devices
+    cam_state.devices = SDL_GetCameras(&cam_state.dev_count);
+    if (cam_state.devices == NULL) {
+        ERROR("Couldn't enumerate devices\n%s", SDL_GetError());
+    } else if (cam_state.dev_count == 0) {
+        ERROR("No camera device found\n%s", SDL_GetError());
+    }
 }
 
 // set camera to current index + given offset
@@ -113,24 +133,12 @@ void set_camera(int offset) {
         if (g_state.fbo != NULL) SDL_DestroyTexture(g_state.fbo);
         g_state.fbo = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET,
                                         g_state.window_width, g_state.window_height);
-    }
-    else  {
+    } else {
+        update_window_title(); // update to default
         ERROR("Couldn't open camera %s\n%s", SDL_GetCameraName(device), SDL_GetError());
     }
 
-    update_window_title();
-    ascii_update_font_size((float)g_state.window_height / g_state.frame_h);
     cam_state.cam_index = index;
-}
-
-void load_cameras() {
-    // load devices
-    cam_state.devices = SDL_GetCameras(&cam_state.dev_count);
-    if (cam_state.devices == NULL) {
-        ERROR("Couldn't enumerate devices\n%s", SDL_GetError());
-    } else if (cam_state.dev_count == 0) {
-        ERROR("No camera device found\n%s", SDL_GetError());
-    }
 }
 
 void init_sdl() {
@@ -223,31 +231,12 @@ void handle_events(bool *quit) {
         if (e.type == SDL_EVENT_CAMERA_DEVICE_ADDED) {
             SDL_CameraID device = e.cdevice.which;
             SDL_Log("%s connected", SDL_GetCameraName(device));
-            if (device != SDL_GetCameraID(cam_state.camera)) {
-                if (cam_state.devices == NULL) {
-                    load_cameras();
-                } else {
-                    cam_state.devices = SDL_realloc(cam_state.devices, cam_state.dev_count + 1);
-                    cam_state.devices[cam_state.dev_count - 1] = device;
-                }
-                // no camera connected
-                if (!cam_state.ready) {
-                    set_camera(0);
-                }
-            }
-
-        } else if (e.type == SDL_EVENT_CAMERA_DEVICE_REMOVED) {
+        }
+        if (e.type == SDL_EVENT_CAMERA_DEVICE_REMOVED) {
             SDL_CameraID device = e.cdevice.which;
-            SDL_CameraID curr_device = SDL_GetCameraID(cam_state.camera);
             SDL_Log("%s disconnected", SDL_GetCameraName(device));
-            SDL_free(cam_state.devices);
-            load_cameras();
-            for (int i = 0; i < cam_state.dev_count; i++) {
-                if (cam_state.devices[i] == curr_device) {
-                    cam_state.cam_index = i;
-                    break;
-                }
-            }
+            cam_state.ready = false;
+            update_window_title();
         }
     }
 
@@ -285,9 +274,22 @@ int main() {
             SDL_DestroySurface(frame);
         }
 
-        // render
+        //---Render---
         SDL_RenderClear(renderer);
-        SDL_RenderTexture(renderer, g_state.fbo, NULL, NULL);
+
+        // not connected
+        if (!cam_state.ready) {
+            open_camera(cam_state.devices[cam_state.cam_index]);
+            if (get_render_mode() != MODE_NON_ASCII) set_render_mode(MODE_NON_ASCII);
+            char *text = "Disconnected...";
+            int w, h;
+            measure_string(text, &w, &h);
+            render_string(text, (g_state.window_width - w) / 2, (g_state.window_height - h) / 2,
+                          (SDL_Color){255, 0, 0, 255});
+        } else {
+            if (get_render_mode() != MODE_ASCII) set_render_mode(MODE_ASCII);
+            SDL_RenderTexture(renderer, g_state.fbo, NULL, NULL);
+        }
         SDL_RenderPresent(renderer);
 
         // FPS cap

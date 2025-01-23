@@ -9,14 +9,29 @@
 
 #define GRAY(R, G, B) (0.2126f*R + 0.7152f*G + 0.0722f*B)
 
+// global state
 TTF_TextEngine *engine;
 TTF_Text *text;
 TTF_Font *font;
+Mode render_mode;
+float font_size;
 char *ascii_table;
 int ascii_table_len;
 
-void ascii_update_font_size(float size) {
-    TTF_SetFontSize(font, size);
+void set_render_mode(Mode mode) {
+    if (mode == MODE_ASCII) {
+        TTF_SetFontSize(font, font_size);
+    } else if (mode == MODE_NON_ASCII) {
+        TTF_SetFontSize(font, NON_ASCII_SIZE);
+    }
+    render_mode = mode;
+}
+
+Mode get_render_mode() { return render_mode; };
+
+void measure_string(char *str, int *w, int *h) {
+    TTF_MeasureString(font, str, 0, 0, w, NULL);
+    *h = NON_ASCII_SIZE;
 }
 
 void render_string(char *str, int x, int y, SDL_Color col) {
@@ -31,7 +46,12 @@ void render_char(char c, int x, int y, SDL_Color col) {
     TTF_DrawRendererText(text, x, y);
 }
 
-void ascii_init(SDL_Renderer *renderer, float font_size) {
+void ascii_update_font_size(float size) {
+    font_size = size;
+    TTF_SetFontSize(font, size);
+}
+
+void ascii_init(SDL_Renderer *renderer, float size) {
     if (!TTF_Init()) {
         ERROR("Couldn't initialize SDL_ttf\n%s", SDL_GetError());
         EXIT(69);
@@ -41,7 +61,7 @@ void ascii_init(SDL_Renderer *renderer, float font_size) {
     ascii_table_len = strlen(ascii_table);
 
     engine = TTF_CreateRendererTextEngine(renderer);
-    font = TTF_OpenFont(DEFAULT_FONT_PATH, font_size);
+    font = TTF_OpenFont(DEFAULT_FONT_PATH, size);
     text = TTF_CreateText(engine, font, "", 0);
 }
 
