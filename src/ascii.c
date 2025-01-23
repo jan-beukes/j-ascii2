@@ -11,45 +11,34 @@
 
 // global state
 TTF_TextEngine *engine;
-TTF_Text *text;
-TTF_Font *font;
-Mode render_mode;
-float font_size;
+TTF_Font *ascii_font;
+TTF_Text *ascii_text;
+TTF_Font *ui_font;
+TTF_Text *ui_text;
+
 char *ascii_table;
 int ascii_table_len;
 
-void set_render_mode(Mode mode) {
-    if (mode == MODE_ASCII) {
-        TTF_SetFontSize(font, font_size);
-    } else if (mode == MODE_NON_ASCII) {
-        TTF_SetFontSize(font, NON_ASCII_SIZE);
-    }
-    render_mode = mode;
-}
-
-Mode get_render_mode() { return render_mode; };
-
 void measure_string(char *str, int *w, int *h) {
-    TTF_MeasureString(font, str, 0, 0, w, NULL);
-    *h = NON_ASCII_SIZE;
+    TTF_MeasureString(ui_font, str, 0, 0, w, NULL);
+    *h = TTF_GetFontSize(ui_font);
 }
 
 void render_string(char *str, int x, int y, SDL_Color col) {
-    TTF_SetTextString(text, str, 0);
-    TTF_SetTextColor(text, col.r, col.g, col.b, col.a);
-    TTF_DrawRendererText(text, x, y);
+    TTF_SetTextString(ui_text, str, 0);
+    TTF_SetTextColor(ui_text, col.r, col.g, col.b, col.a);
+    TTF_DrawRendererText(ui_text, x, y);
 }
 
-void render_char(char c, int x, int y, SDL_Color col) {
-    TTF_SetTextString(text, &c, 1);
-    TTF_SetTextColor(text, col.r, col.g, col.b, col.a);
-    TTF_DrawRendererText(text, x, y);
+void render_ascii_char(char c, int x, int y, SDL_Color col) {
+    TTF_SetTextString(ascii_text, &c, 1);
+    TTF_SetTextColor(ascii_text, col.r, col.g, col.b, col.a);
+    TTF_DrawRendererText(ascii_text, x, y);
 }
 
-void ascii_update_font_size(float size) {
-    font_size = size;
-    TTF_SetFontSize(font, size);
-}
+void ascii_update_font_size(float size) {TTF_SetFontSize(ascii_font, size); }
+
+void update_font_size(float size) { TTF_SetFontSize(ui_font, size); }
 
 void ascii_init(SDL_Renderer *renderer, float size) {
     if (!TTF_Init()) {
@@ -61,8 +50,20 @@ void ascii_init(SDL_Renderer *renderer, float size) {
     ascii_table_len = strlen(ascii_table);
 
     engine = TTF_CreateRendererTextEngine(renderer);
-    font = TTF_OpenFont(DEFAULT_FONT_PATH, size);
-    text = TTF_CreateText(engine, font, "", 0);
+
+    // load fonts and create text objects
+    ascii_font = TTF_OpenFont("res/font.ttf", size);
+    ascii_text = TTF_CreateText(engine, ascii_font, "", 0);
+    ui_font = TTF_OpenFont("res/font2.ttf", 32.0f);
+    ui_text = TTF_CreateText(engine, ui_font, "", 0);
+}
+
+void ascii_deinit() {
+    TTF_CloseFont(ascii_font);
+    TTF_DestroyText(ascii_text);
+    TTF_CloseFont(ui_font);
+    TTF_DestroyText(ui_text);
+    TTF_Quit();
 }
 
 #define BYTES_PER_PIXEL 3
@@ -101,7 +102,7 @@ void ascii_render(SDL_Renderer *renderer, SDL_FRect *dst_rect, SDL_Surface *fram
             int index = gray * ((ascii_table_len - 1) / 255.0f);
             char c = ascii_table[index];
 
-            render_char(c, x_pos, y_pos, color);
+            render_ascii_char(c, x_pos, y_pos, color);
         }
     }
 }

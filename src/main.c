@@ -167,6 +167,7 @@ void init_sdl() {
         ERROR("Failed to create window and renderer\n%s", SDL_GetError());
         EXIT(69);
     }
+    // create render texture on successfull init
     if (cam_state.ready)
         g_state.fbo = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET,
                                         g_state.window_width, g_state.window_height);
@@ -177,13 +178,13 @@ void init_sdl() {
 }
 
 void deinit() {
-    
+    ascii_deinit();
+
     SDL_free(cam_state.devices);
     SDL_CloseCamera(cam_state.camera);
     SDL_DestroyTexture(g_state.fbo);
     SDL_DestroyWindow(window);
     SDL_DestroyRenderer(renderer);
-    TTF_Quit();
     SDL_Quit();
 }
 
@@ -236,7 +237,7 @@ void handle_events(bool *quit) {
             SDL_CameraID device = e.cdevice.which;
             SDL_Log("%s disconnected", SDL_GetCameraName(device));
             cam_state.ready = false;
-            update_window_title();
+            update_window_title(); // lost current cam so should set to default
         }
     }
 
@@ -250,11 +251,11 @@ int main() {
     g_state.time_delta = FRAME_TIME;
     init_sdl();
 
-    update_window_title();
+    update_font_size(48.0f);
+
     while(!quit) {
         // input
         handle_events(&quit);
-
 
         // camera frame
         SDL_FRect frame_rect = {0, 0, g_state.window_width, g_state.window_height};
@@ -279,15 +280,15 @@ int main() {
 
         // not connected
         if (!cam_state.ready) {
+            // try reconnect
             open_camera(cam_state.devices[cam_state.cam_index]);
-            if (get_render_mode() != MODE_NON_ASCII) set_render_mode(MODE_NON_ASCII);
+
             char *text = "Disconnected...";
             int w, h;
             measure_string(text, &w, &h);
             render_string(text, (g_state.window_width - w) / 2, (g_state.window_height - h) / 2,
                           (SDL_Color){255, 0, 0, 255});
         } else {
-            if (get_render_mode() != MODE_ASCII) set_render_mode(MODE_ASCII);
             SDL_RenderTexture(renderer, g_state.fbo, NULL, NULL);
         }
         SDL_RenderPresent(renderer);
