@@ -7,7 +7,7 @@
 #include "ascii.h"
 
 #define WINDOW_SIZE 1200
-#define FRAME_TIME (1000.0f / 1000.0f)
+#define FRAME_TIME (1000.0f / 60.0f)
 
 #define ERROR(fmt, ...) SDL_Log("ERROR: " fmt, ##__VA_ARGS__)
 #define EXIT(code) ({SDL_Quit(); exit(code);})
@@ -29,13 +29,25 @@ struct {
     bool ready;
     int resx;
     int resy;
+    int fps;
+
     SDL_Camera *camera;
-    SDL_CameraID cam_id;
-    // video mode
+    int cam_index;
+    int dev_count;
+    SDL_CameraID *devices;
 } cam_state = {0};
 
 SDL_Window *window;
 SDL_Renderer *renderer;
+
+void update_window_title() {
+    // Title
+    char title[256];
+    SDL_CameraID device = SDL_GetCameraID(cam_state.camera);
+    const char *name = SDL_GetCameraName(device);
+    sprintf(title, "%s | %dx%d %dfps", name, g_state.frame_w, g_state.frame_h, cam_state.fps);
+    SDL_SetWindowTitle(window, title);
+}
 
 bool open_camera(SDL_CameraID device) {
     if (cam_state.camera != NULL) SDL_CloseCamera(cam_state.camera);
@@ -50,11 +62,11 @@ bool open_camera(SDL_CameraID device) {
         int best_fps = 0;
         for (int i = 0; i < format_count; i++) {
             SDL_CameraSpec *f = formats[i];
-            int fps = f->framerate_numerator;
+            int fps = f->framerate_numerator / f->framerate_denominator;
             if (fps > best_fps) {
                 best_fps = fps;
                 best_format = f;
-            } else if (fps <= best_fps) break;
+            }
         }
     }
 
@@ -67,36 +79,58 @@ bool open_camera(SDL_CameraID device) {
     cam_state.ready = true;
     cam_state.resx = best_format->width;
     cam_state.resy = best_format->height;
-    cam_state.cam_id = device;
+    cam_state.fps = best_format->framerate_numerator / best_format->framerate_denominator;
 
     g_state.window_height = g_state.window_width * ((float)cam_state.resy / cam_state.resx);
-    g_state.frame_w = (g_state.scale * cam_state.resx);
+    g_state.frame_w = DEFAULT_RES;
     g_state.frame_h = g_state.frame_w * ((float)cam_state.resy / cam_state.resx);
 
     SDL_free(formats);
     return true;
 }
 
-void init_camera() {
-    int dev_count;
-    SDL_CameraID *devices = SDL_GetCameras(&dev_count);
-
-    cam_state.resx = g_state.window_width;
-    cam_state.resy = g_state.window_height;
-    cam_state.camera = NULL;
-    cam_state.ready = false;
-
-    if (devices == NULL) {
-        ERROR("Couldn't enumerate devices\n%s", SDL_GetError());
-    } else if (dev_count == 0) {
-        ERROR("No camera device found\n%s", SDL_GetError());
-    } else {
-        // just open first camera
-        if(!open_camera(devices[0])) {
-            ERROR("Couldn't open camera %d\n%s", devices[0], SDL_GetError());
-        }
+// set camera to current index + given offset
+void set_camera(int offset) {
+    SDL_assert(offset == 0 || offset == 1 || offset == -1);
+    if (cam_state.dev_count == 0 || cam_state.devices == NULL) {
+        cam_state.camera = NULL;
+        cam_state.ready = false;
+        cam_state.cam_index = 0;
+        return;
     }
-    SDL_free(devices);
+
+    int index = cam_state.cam_index + offset;
+    // wrap cameras
+    if (index <= -1) index = cam_state.dev_count - 1;
+    else if (index >= cam_state.dev_count) index = 0;
+
+    if (index == cam_state.cam_index && cam_state.ready) return; // nothing happened
+
+    SDL_CameraID device = cam_state.devices[index];
+
+    if (open_camera(device)) {
+        SDL_SetWindowSize(window, g_state.window_width, g_state.window_height);
+        if (g_state.fbo != NULL) SDL_DestroyTexture(g_state.fbo);
+        g_state.fbo = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET,
+                                        g_state.window_width, g_state.window_height);
+    }
+    else  {
+        ERROR("Couldn't open camera %s\n%s", SDL_GetCameraName(device), SDL_GetError());
+    }
+
+    update_window_title();
+    ascii_update_font_size((float)g_state.window_height / g_state.frame_h);
+    cam_state.cam_index = index;
+}
+
+void load_cameras() {
+    // load devices
+    cam_state.devices = SDL_GetCameras(&cam_state.dev_count);
+    if (cam_state.devices == NULL) {
+        ERROR("Couldn't enumerate devices\n%s", SDL_GetError());
+    } else if (cam_state.dev_count == 0) {
+        ERROR("No camera device found\n%s", SDL_GetError());
+    }
 }
 
 void init_sdl() {
@@ -107,13 +141,28 @@ void init_sdl() {
     }
 
     // Camera
-    init_camera();
+    cam_state.resx = g_state.window_width;
+    cam_state.resy = g_state.window_height;
+    cam_state.camera = NULL;
+    cam_state.ready = false;
+    cam_state.cam_index = 0;
 
+    load_cameras();
+    SDL_CameraID device = cam_state.devices[cam_state.cam_index];
+    if (!open_camera(device)) {
+        ERROR("Couldn't open camera %s\n%s", SDL_GetCameraName(device), SDL_GetError());
+    }
+
+    // renderer
     if (!SDL_CreateWindowAndRenderer("J-Ascii2", g_state.window_width,
                                      g_state.window_height, 0, &window, &renderer)) {
         ERROR("Failed to create window and renderer\n%s", SDL_GetError());
         EXIT(69);
     }
+    if (cam_state.ready)
+        g_state.fbo = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET,
+                                        g_state.window_width, g_state.window_height);
+
 
     float font_size = (float)g_state.window_height / g_state.frame_h;
     ascii_init(renderer, font_size);
@@ -121,7 +170,9 @@ void init_sdl() {
 
 void deinit() {
     
+    SDL_free(cam_state.devices);
     SDL_CloseCamera(cam_state.camera);
+    SDL_DestroyTexture(g_state.fbo);
     SDL_DestroyWindow(window);
     SDL_DestroyRenderer(renderer);
     TTF_Quit();
@@ -138,45 +189,64 @@ void handle_events(bool *quit) {
                 case SDLK_ESCAPE: *quit = true;
                 break;
 
-#define SCALE_STEP 0.02f
+                // Frame scale
+#define SCALE_STEP 1.2f
+#define LIMIT_UPPER 256
+#define LIMIT_LOWER 16
                 case SDLK_EQUALS: {
-                    g_state.scale += SCALE_STEP;
-                    g_state.scale = g_state.scale > 0.5f ? 0.5f : g_state.scale;
-                    g_state.frame_w = (g_state.scale * cam_state.resx);
+                    g_state.frame_w /= SCALE_STEP;
+                    g_state.frame_w = g_state.frame_w < LIMIT_LOWER ? LIMIT_LOWER : g_state.frame_w;
                     g_state.frame_h = g_state.frame_w * ((float)cam_state.resy / cam_state.resx);
-                    ascii_update_font_size(g_state.window_height / g_state.frame_h);
+                    ascii_update_font_size((float)g_state.window_height / g_state.frame_h);
+                    update_window_title();
                 }
                 break;
                 case SDLK_MINUS: {
-                    g_state.scale -= SCALE_STEP;
-                    g_state.scale = g_state.scale < 0.01f ? 0.01f : g_state.scale;
-                    g_state.frame_w = (g_state.scale * cam_state.resx);
+                    g_state.frame_w *= SCALE_STEP;
+                    g_state.frame_w = g_state.frame_w > LIMIT_UPPER ? LIMIT_UPPER : g_state.frame_w;
                     g_state.frame_h = g_state.frame_w * ((float)cam_state.resy / cam_state.resx);
-                    ascii_update_font_size(g_state.window_height / g_state.frame_h);
+                    ascii_update_font_size((float)g_state.window_height / g_state.frame_h);
+                    update_window_title();
                 }
                 break;
 
+                case SDLK_RIGHT:
+                    set_camera(1);
+                break;
+                case SDLK_LEFT:
+                    set_camera(-1);
+                break;
             }
         }
 
-        // camera events
+        //--Camera events---
         if (e.type == SDL_EVENT_CAMERA_DEVICE_ADDED) {
-            SDL_Log("Camera device added");
-            // new camera connection
-            if (!cam_state.ready) {
-                if (open_camera(e.cdevice.which)) {
-                    SDL_SetWindowSize(window, g_state.window_width, g_state.window_height);
-                    g_state.fbo = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET,
-                                                    g_state.window_width, g_state.window_height);
+            SDL_CameraID device = e.cdevice.which;
+            SDL_Log("%s connected", SDL_GetCameraName(device));
+            if (device != SDL_GetCameraID(cam_state.camera)) {
+                if (cam_state.devices == NULL) {
+                    load_cameras();
+                } else {
+                    cam_state.devices = SDL_realloc(cam_state.devices, cam_state.dev_count + 1);
+                    cam_state.devices[cam_state.dev_count - 1] = device;
                 }
-                else 
-                    ERROR("Couldn't open camera %d\n%s", e.cdevice.which, SDL_GetError());
+                // no camera connected
+                if (!cam_state.ready) {
+                    set_camera(0);
+                }
             }
+
         } else if (e.type == SDL_EVENT_CAMERA_DEVICE_REMOVED) {
-            SDL_Log("Camera device removed");
-            if (e.cdevice.which == cam_state.cam_id) {
-                cam_state.camera = NULL;
-                cam_state.ready = false;
+            SDL_CameraID device = e.cdevice.which;
+            SDL_CameraID curr_device = SDL_GetCameraID(cam_state.camera);
+            SDL_Log("%s disconnected", SDL_GetCameraName(device));
+            SDL_free(cam_state.devices);
+            load_cameras();
+            for (int i = 0; i < cam_state.dev_count; i++) {
+                if (cam_state.devices[i] == curr_device) {
+                    cam_state.cam_index = i;
+                    break;
+                }
             }
         }
     }
@@ -185,31 +255,33 @@ void handle_events(bool *quit) {
 
 int main() {
     bool quit = false;
-    g_state.scale = DEFAULT_SCALE;
     g_state.window_width = WINDOW_SIZE;
     g_state.window_height = WINDOW_SIZE;
     g_state.time_prev = 0;
+    g_state.time_delta = FRAME_TIME;
     init_sdl();
 
-    g_state.fbo = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET,
-                                    g_state.window_width, g_state.window_height);
+    update_window_title();
     while(!quit) {
+        // input
+        handle_events(&quit);
+
 
         // camera frame
+        SDL_FRect frame_rect = {0, 0, g_state.window_width, g_state.window_height};
         SDL_Surface *camera_frame = SDL_AcquireCameraFrame(cam_state.camera, NULL);
+
         // since camera provides at fixed fps we dont update texture until new frame
         if (camera_frame) {
             // scale frame
             SDL_Surface *frame = SDL_CreateSurface(g_state.frame_w, g_state.frame_h, SDL_PIXELFORMAT_RGB24);
             SDL_BlitSurfaceScaled(camera_frame, NULL, frame, NULL, SDL_SCALEMODE_NEAREST);
-
-            SDL_FRect dst_rect = {0, 0, g_state.window_width, g_state.window_height};
+            SDL_ReleaseCameraFrame(cam_state.camera, camera_frame);
 
             SDL_SetRenderTarget(renderer, g_state.fbo);
-            ascii_render(renderer, &dst_rect, frame);
+            ascii_render(renderer, &frame_rect, frame);
             SDL_SetRenderTarget(renderer, NULL);
 
-            SDL_ReleaseCameraFrame(cam_state.camera, camera_frame);
             SDL_DestroySurface(frame);
         }
 
@@ -217,9 +289,6 @@ int main() {
         SDL_RenderClear(renderer);
         SDL_RenderTexture(renderer, g_state.fbo, NULL, NULL);
         SDL_RenderPresent(renderer);
-
-        // input
-        handle_events(&quit);
 
         // FPS cap
         Uint64 time = SDL_GetTicks();
@@ -231,9 +300,6 @@ int main() {
         g_state.time_delta += delay_time;
         g_state.time_prev = time + delay_time;
 
-        char title[32];
-        sprintf(title, "%ld", 1000 / g_state.time_delta);
-        SDL_SetWindowTitle(window, title);
     }
 
     deinit();

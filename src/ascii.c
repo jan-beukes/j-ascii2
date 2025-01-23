@@ -48,38 +48,32 @@ void ascii_init(SDL_Renderer *renderer, float font_size) {
 #define BYTES_PER_PIXEL 3
 SDL_Color get_pixel_color(SDL_Surface *img, int x, int y) {
     Uint8 *pixels = (Uint8 *)img->pixels;
-    Uint8 *pixel = pixels + y *img->pitch + x*BYTES_PER_PIXEL; // address of this pixel
+    Uint8 *pixel = pixels + y *img->pitch + x*BYTES_PER_PIXEL;
 
     SDL_Color color;
-    // no 3 byte int type
-    if (SDL_BYTEORDER == SDL_BIG_ENDIAN) {
-        color.r = pixel[0];
-        color.g = pixel[1];
-        color.b = pixel[2];
-    } else {
-        color.r = pixel[2];
-        color.g = pixel[1];
-        color.b = pixel[0];
-    }
+    color.r = pixel[0];
+    color.g = pixel[1];
+    color.b = pixel[2];
     color.a = 255;
 
     return color;
 }
 
-// render the given surface with the ascii renderer
-// format is in RGB24 since webcam formats are so sus
+/*  render the given surface with the ascii renderer.
+    dst_rect specifies size of render area.
+    format is in RGB24 since webcam formats are so sus.
+*/
 void ascii_render(SDL_Renderer *renderer, SDL_FRect *dst_rect, SDL_Surface *frame) {
     SDL_assert(frame->format == SDL_PIXELFORMAT_RGB24);
 
     SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
     SDL_RenderClear(renderer);
 
-    float char_width = dst_rect->w / frame->w;
-    float char_height = dst_rect->h / frame->h;
+    float char_size = dst_rect->h / frame->h;
     for(int y = 0; y < frame->h; y++) { 
-        int y_pos = char_height * y;
+        int y_pos = y * char_size;
         for (int x = 0; x < frame->w; x++) {
-            int x_pos = char_width * x;
+            int x_pos = x * char_size;
 
             SDL_Color color = get_pixel_color(frame, x, y);
 
@@ -90,6 +84,5 @@ void ascii_render(SDL_Renderer *renderer, SDL_FRect *dst_rect, SDL_Surface *fram
             render_char(c, x_pos, y_pos, color);
         }
     }
-
 }
 
