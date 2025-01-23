@@ -281,9 +281,10 @@ int main(int argc, char *argv[]) {
     if (!(argc == 1 || argc == 3)) {
         if (argc == 2) {
             char *flag = argv[1];
-            if (strcmp(flag, "-h") == 0 || strcmp(flag, "--help")) {
+            if (strcmp(flag, "-h") == 0 || strcmp(flag, "--help") == 0) {
                 SDL_Log("Usage: j-ascii | j-ascii -f <.tbl file>");
-                SDL_Log("Uses default ascii table as well as ascii.tbl file if not provided");
+                SDL_Log("if no file is provided ascii.tbl is searched for in the working directory.");
+                SDL_Log("default ascii table is always included.");
                 return 0;
             }
         }
