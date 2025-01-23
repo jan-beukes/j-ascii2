@@ -10,7 +10,9 @@
 #define LIMIT_UPPER 240
 #define LIMIT_LOWER 16
 
-#define WINDOW_SIZE 1200
+#define WINDOW_WIDTH 1200
+#define WINDOW_HEIGHT 800
+
 #define BAR_WIDTH 150
 #define FRAME_TIME (1000.0f / 60.0f)
 
@@ -68,17 +70,15 @@ bool open_camera(SDL_CameraID device) {
     int format_count = 0;
     SDL_CameraSpec **formats = SDL_GetCameraSupportedFormats(device, &format_count);
     SDL_CameraSpec *best_format = NULL;
-    if (formats == NULL) {
-        ERROR("Couldn't get camera formats\n%s", SDL_GetError());
-    } else {
-        int best_fps = 0;
-        for (int i = 0; i < format_count; i++) {
-            SDL_CameraSpec *f = formats[i];
-            int fps = f->framerate_numerator / f->framerate_denominator;
-            if (fps > best_fps) {
-                best_fps = fps;
-                best_format = f;
-            }
+    if (formats == NULL)
+        return false;
+    int best_fps = 0;
+    for (int i = 0; i < format_count; i++) {
+        SDL_CameraSpec *f = formats[i];
+        int fps = f->framerate_numerator / f->framerate_denominator;
+        if (fps > best_fps) {
+            best_fps = fps;
+            best_format = f;
         }
     }
 
@@ -303,8 +303,8 @@ int main(int argc, char *argv[]) {
     }
 
     bool quit = false;
-    g_state.window_width = WINDOW_SIZE;
-    g_state.window_height = WINDOW_SIZE;
+    g_state.window_width = WINDOW_WIDTH;
+    g_state.window_height = WINDOW_HEIGHT;
     g_state.time_prev = 0;
     g_state.time_delta = FRAME_TIME;
     init(table_file);
@@ -351,11 +351,11 @@ int main(int argc, char *argv[]) {
         //---UI---
         update_font_size(24.0f);
         SDL_Color color = {40, 0, 255, 255};
+        char text[128];
+        int w, h;
 
         // Cameras
-        char text[128];
         sprintf(text, "Camera %d/%d", cam_state.cam_index + 1, cam_state.dev_count);
-        int w, h;
         measure_string(text, &w, &h);
         render_string(text, g_state.window_width - w - 10, 10, color);
         // Ascii table
